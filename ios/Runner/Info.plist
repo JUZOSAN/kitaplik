@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Kitapları seçmek için galeriye erişim izni gerekiyor</string>
 </dict>
 </plist>
