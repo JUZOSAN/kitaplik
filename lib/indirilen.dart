@@ -3,6 +3,11 @@ import 'main.dart';
 import 'profil.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:open_file/open_file.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'dart:convert';
+import 'dart:io';
 
 class IndirilenKitaplar extends StatefulWidget {
   const IndirilenKitaplar({super.key});
@@ -12,8 +17,31 @@ class IndirilenKitaplar extends StatefulWidget {
 }
 
 class _IndirilenKitaplarState extends State<IndirilenKitaplar> {
-  // İndirilen kitapları saklamak için liste
   List<Map<String, String>> indirilenKitaplar = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadKitaplar();
+  }
+
+  // Kitapları yükle
+  Future<void> _loadKitaplar() async {
+    final prefs = await SharedPreferences.getInstance();
+    final kitaplarJson = prefs.getString('indirilenKitaplar');
+    if (kitaplarJson != null) {
+      setState(() {
+        indirilenKitaplar = List<Map<String, String>>.from(
+            json.decode(kitaplarJson).map((x) => Map<String, String>.from(x)));
+      });
+    }
+  }
+
+  // Kitapları kaydet
+  Future<void> _saveKitaplar() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('indirilenKitaplar', json.encode(indirilenKitaplar));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -195,6 +223,9 @@ class _IndirilenKitaplarState extends State<IndirilenKitaplar> {
                       ),
                     ),
                     subtitle: Text(kitap['author'] ?? 'Yazar Adı'),
+                    onTap: () {
+                      _openBook(kitap['path']!);
+                    },
                     onLongPress: () {
                       showDialog(
                         context: context,
@@ -208,10 +239,11 @@ class _IndirilenKitaplarState extends State<IndirilenKitaplar> {
                               child: Text('İptal'),
                             ),
                             TextButton(
-                              onPressed: () {
+                              onPressed: () async {
                                 setState(() {
                                   indirilenKitaplar.removeAt(index);
                                 });
+                                await _saveKitaplar();
                                 Navigator.pop(context);
                               },
                               child: Text('Sil',
@@ -257,7 +289,6 @@ class _IndirilenKitaplarState extends State<IndirilenKitaplar> {
     );
   }
 
-  // Dosya seçme fonksiyonu
   void _pickFile(BuildContext context) async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -266,12 +297,10 @@ class _IndirilenKitaplarState extends State<IndirilenKitaplar> {
       );
 
       if (result != null && result.files.isNotEmpty) {
-        // Dosya seçildi
         String fileName = result.files.single.name;
         String? filePath = result.files.single.path;
 
         if (filePath != null) {
-          // Seçilen dosyayı listeye ekle
           setState(() {
             indirilenKitaplar.add({
               'name': fileName,
@@ -279,22 +308,12 @@ class _IndirilenKitaplarState extends State<IndirilenKitaplar> {
               'path': filePath,
             });
           });
-
-          print('Kitap eklendi: $fileName, Yol: $filePath');
-          print('Toplam kitap sayısı: ${indirilenKitaplar.length}');
+          await _saveKitaplar();
 
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('$fileName seçildi'),
               backgroundColor: Colors.green,
-            ),
-          );
-        } else {
-          print('Dosya yolu null');
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Dosya yolu alınamadı'),
-              backgroundColor: Colors.red,
             ),
           );
         }
@@ -304,6 +323,70 @@ class _IndirilenKitaplarState extends State<IndirilenKitaplar> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Dosya seçilirken bir hata oluştu'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Kitap açma fonksiyonu
+  void _openBook(String filePath) async {
+    try {
+      if (filePath.toLowerCase().endsWith('.pdf')) {
+        final file = File(filePath);
+        if (await file.exists()) {
+          // Son okunan sayfayı yükle
+          final prefs = await SharedPreferences.getInstance();
+          final lastPage = prefs.getInt('last_page_$filePath') ?? 0;
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => Scaffold(
+                appBar: AppBar(
+                  title: Text('PDF Görüntüleyici'),
+                  backgroundColor: Colors.blue.shade900,
+                ),
+                body: SfPdfViewer.file(
+                  file,
+                  controller: PdfViewerController()..jumpToPage(lastPage),
+                  enableDoubleTapZooming: true,
+                  enableTextSelection: true,
+                  onPageChanged: (PdfPageChangedDetails details) async {
+                    // Sayfa değiştiğinde kaydet
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setInt(
+                        'last_page_$filePath', details.newPageNumber);
+                  },
+                ),
+              ),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Dosya bulunamadı'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } else {
+        // Diğer dosya formatları için varsayılan uygulamayı kullan
+        final result = await OpenFile.open(filePath);
+        if (result.type != ResultType.done) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Kitap açılırken bir hata oluştu'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Kitap açılırken hata: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Kitap açılırken bir hata oluştu'),
           backgroundColor: Colors.red,
         ),
       );
